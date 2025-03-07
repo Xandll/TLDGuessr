@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TLD Guesser - Errate das Land zur Domain</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #f5f5f5;
+        }
+        
+        header {
+            background-color: #4285f4;
+            color: white;
+            width: 100%;
+            padding: 1rem 0;
+            text-align: center;
+        }
+        
+        .game-container {
+            width: 90%;
+            max-width: 1200px;
+            margin: 2rem auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .tld-display {
+            font-size: 3rem;
+            font-weight: bold;
+            margin-bottom: 1rem;
+            padding: 1rem 2rem;
+            background-color: #fff;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        #map {
+            width: 100%;
+            height: 500px;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        
+        .score-container {
+            font-size: 1.2rem;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 1rem;
+        }
+        
+        button {
+            padding: 0.5rem 1rem;
+            font-size: 1rem;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #3367d6;
+        }
+        
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .status-message {
+            margin-top: 1rem;
+            font-weight: bold;
+            height: 1.5rem;
+        }
+        
+        .difficulty-selector {
+            margin-bottom: 1rem;
+        }
+        
+        .coverage-indicator {
+            display: inline-block;
+            margin-left: 0.5rem;
+            font-size: 0.8rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 3px;
+        }
+        
+        .full-coverage {
+            background-color: #4285f4;
+            color: white;
+        }
+        
+        .rare-coverage {
+            background-color: #a0c4ff;
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <!--<header>
+        <h1>TLD Guesser</h1>
+        <p>Errate das Land zur Domain-Endung</p>
+    </header>-->
+    
+    <div class="game-container">
+        <div class="difficulty-selector">
+            <label>
+                <input type="checkbox" id="include-rare" checked> 
+                Länder mit seltener Abdeckung einbeziehen
+            </label>
+        </div>
+        
+        <div class="tld-display" id="current-tld">.??</div>
+        
+        <div id="map"></div>
+        
+        <div class="status-message" id="status-message"></div>
+        
+        <div class="score-container">
+            <p>Punkte: <span id="score">0</span></p>
+            <p>Runde: <span id="round">0</span>/10</p>
+        </div>
+        
+        <div class="controls">
+            <button id="next-round" disabled>Nächste TLD</button>
+            <button id="new-game">Neues Spiel</button>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    <script>
+        // TLD-Datenbank mit Ländern
+        // TLD-Datenbank mit Ländern
+const tldDatabase = [
+    // Western Europe
+    { tld: ".ad", country: "Andorra", bounds: [[42.43, 1.41], [42.66, 1.79]], coverage: "full" },
+    { tld: ".at", country: "Österreich", bounds: [[46.37, 9.53], [49.02, 17.16]], coverage: "full" },
+    { tld: ".be", country: "Belgien", bounds: [[49.5, 2.54], [51.5, 6.4]], coverage: "full" },
+    { tld: ".fr", country: "Frankreich", bounds: [[41.33, -5.14], [51.09, 9.56]], coverage: "full" },
+    { tld: ".de", country: "Deutschland", bounds: [[47.27, 5.87], [55.1, 15.04]], coverage: "full" },
+    { tld: ".gr", country: "Griechenland", bounds: [[34.8, 19.37], [41.75, 28.25]], coverage: "full" },
+    { tld: ".ie", country: "Irland", bounds: [[51.45, -10.47], [55.37, -6.01]], coverage: "full" },
+    { tld: ".im", country: "Isle of Man", bounds: [[54.05, -4.83], [54.41, -4.31]], coverage: "full" },
+    { tld: ".it", country: "Italien", bounds: [[36.62, 6.62], [47.1, 18.52]], coverage: "full" },
+    { tld: ".lu", country: "Luxemburg", bounds: [[49.45, 5.73], [50.18, 6.53]], coverage: "full" },
+    { tld: ".mt", country: "Malta", bounds: [[35.79, 14.18], [36.08, 14.58]], coverage: "full" },
+    { tld: ".mc", country: "Monaco", bounds: [[43.72, 7.41], [43.75, 7.44]], coverage: "full" },
+    { tld: ".nl", country: "Niederlande", bounds: [[50.75, 3.37], [53.55, 7.21]], coverage: "full" },
+    { tld: ".pt", country: "Portugal", bounds: [[36.96, -9.5], [42.15, -6.19]], coverage: "full" },
+    { tld: ".es", country: "Spanien", bounds: [[36.0, -9.39], [43.79, 4.31]], coverage: "full" },
+    { tld: ".ch", country: "Schweiz", bounds: [[45.82, 5.96], [47.81, 10.49]], coverage: "full" },
+    { tld: ".uk", country: "Vereinigtes Königreich", bounds: [[49.96, -8.2], [58.67, 1.78]], coverage: "full" },
+    
+    // Eastern Europe
+    { tld: ".al", country: "Albanien", bounds: [[39.65, 19.27], [42.66, 21.05]], coverage: "full" },
+    { tld: ".bg", country: "Bulgarien", bounds: [[41.24, 22.36], [44.22, 28.61]], coverage: "full" },
+    { tld: ".hr", country: "Kroatien", bounds: [[42.38, 13.48], [46.55, 19.45]], coverage: "full" },
+    { tld: ".cz", country: "Tschechien", bounds: [[48.55, 12.09], [51.06, 18.86]], coverage: "full" },
+    { tld: ".hu", country: "Ungarn", bounds: [[45.74, 16.11], [48.58, 22.9]], coverage: "full" },
+    { tld: ".me", country: "Montenegro", bounds: [[41.85, 18.45], [43.57, 20.34]], coverage: "full" },
+    { tld: ".mk", country: "Nordmazedonien", bounds: [[40.85, 20.46], [42.37, 23.03]], coverage: "full" },
+    { tld: ".pl", country: "Polen", bounds: [[49.0, 14.12], [54.83, 24.15]], coverage: "full" },
+    { tld: ".ro", country: "Rumänien", bounds: [[43.62, 20.26], [48.27, 29.77]], coverage: "full" },
+    { tld: ".ru", country: "Russland", bounds: [[41.2, 19.64], [81.85, 179.0]], coverage: "full" },
+    { tld: ".rs", country: "Serbien", bounds: [[42.23, 18.82], [46.19, 23.01]], coverage: "full" },
+    { tld: ".sk", country: "Slowakei", bounds: [[47.74, 16.84], [49.61, 22.57]], coverage: "full" },
+    { tld: ".si", country: "Slowenien", bounds: [[45.42, 13.38], [46.88, 16.61]], coverage: "full" },
+    { tld: ".ua", country: "Ukraine", bounds: [[44.39, 22.13], [52.37, 40.22]], coverage: "full" },
+    
+    // Nordics
+    { tld: ".dk", country: "Dänemark", bounds: [[54.56, 8.07], [57.75, 12.69]], coverage: "full" },
+    { tld: ".fo", country: "Färöer Inseln", bounds: [[61.39, -7.69], [62.4, -6.25]], coverage: "full" },
+    { tld: ".fi", country: "Finnland", bounds: [[59.81, 20.62], [70.09, 31.58]], coverage: "full" },
+    { tld: ".gl", country: "Grönland", bounds: [[59.78, -73.04], [83.62, -11.31]], coverage: "full" },
+    { tld: ".is", country: "Island", bounds: [[63.3, -24.32], [66.53, -13.57]], coverage: "full" },
+    { tld: ".no", country: "Norwegen", bounds: [[57.98, 4.65], [71.18, 31.05]], coverage: "full" },
+    { tld: ".se", country: "Schweden", bounds: [[55.34, 11.11], [69.06, 24.17]], coverage: "full" },
+    
+    // Baltics
+    { tld: ".ee", country: "Estland", bounds: [[57.52, 21.84], [59.67, 28.21]], coverage: "full" },
+    { tld: ".lv", country: "Lettland", bounds: [[55.67, 20.97], [58.08, 28.24]], coverage: "full" },
+    { tld: ".lt", country: "Litauen", bounds: [[53.9, 20.94], [56.45, 26.84]], coverage: "full" },
+    
+    // Latin America
+    { tld: ".ar", country: "Argentinien", bounds: [[-55.05, -73.56], [-21.78, -53.64]], coverage: "full" },
+    { tld: ".bo", country: "Bolivien", bounds: [[-22.89, -69.64], [-9.68, -57.52]], coverage: "full" },
+    { tld: ".br", country: "Brasilien", bounds: [[-33.74, -73.99], [5.27, -34.79]], coverage: "full" },
+    { tld: ".cl", country: "Chile", bounds: [[-55.92, -75.64], [-17.58, -66.96]], coverage: "full" },
+    { tld: ".co", country: "Kolumbien", bounds: [[-4.23, -79.02], [12.44, -66.85]], coverage: "full" },
+    { tld: ".cr", country: "Costa Rica", bounds: [[8.03, -85.94], [11.22, -82.55]], coverage: "full" },
+    { tld: ".cw", country: "Curaçao", bounds: [[11.98, -69.16], [12.39, -68.64]], coverage: "full" },
+    { tld: ".do", country: "Dominikanische Republik", bounds: [[17.54, -71.98], [19.93, -68.32]], coverage: "full" },
+    { tld: ".ec", country: "Ecuador", bounds: [[-5.01, -81.08], [1.44, -75.19]], coverage: "full" },
+    { tld: ".gt", country: "Guatemala", bounds: [[13.74, -92.23], [17.82, -88.23]], coverage: "full" },
+    { tld: ".mx", country: "Mexiko", bounds: [[14.55, -118.36], [32.71, -86.71]], coverage: "full" },
+    { tld: ".pa", country: "Panama", bounds: [[7.2, -83.05], [9.64, -77.17]], coverage: "full" },
+    { tld: ".pe", country: "Peru", bounds: [[-18.35, -81.33], [-0.04, -68.68]], coverage: "full" },
+    { tld: ".pr", country: "Puerto Rico", bounds: [[17.92, -67.27], [18.52, -65.59]], coverage: "full" },
+    { tld: ".uy", country: "Uruguay", bounds: [[-34.95, -58.43], [-30.09, -53.18]], coverage: "full" },
+    { tld: ".vi", country: "U.S. Virgin Islands", bounds: [[17.68, -65.03], [18.38, -64.57]], coverage: "full" },
+    
+    // North America
+    { tld: ".bm", country: "Bermuda", bounds: [[32.25, -64.89], [32.39, -64.65]], coverage: "full" },
+    { tld: ".ca", country: "Kanada", bounds: [[41.68, -141.0], [83.11, -52.64]], coverage: "full" },
+    { tld: ".us", country: "USA", bounds: [[24.52, -125.0], [49.38, -66.93]], coverage: "full" },
+    
+    // South & South-East Asia
+    { tld: ".bd", country: "Bangladesch", bounds: [[20.74, 88.01], [26.63, 92.67]], coverage: "full" },
+    { tld: ".bt", country: "Bhutan", bounds: [[26.7, 88.75], [28.36, 92.12]], coverage: "full" },
+    { tld: ".kh", country: "Kambodscha", bounds: [[10.41, 102.35], [14.69, 107.63]], coverage: "full" },
+    { tld: ".cx", country: "Christmas Island", bounds: [[-10.57, 105.53], [-10.41, 105.71]], coverage: "full" },
+    { tld: ".in", country: "Indien", bounds: [[6.75, 68.16], [35.67, 97.4]], coverage: "full" },
+    { tld: ".id", country: "Indonesien", bounds: [[-10.14, 95.01], [5.9, 141.02]], coverage: "full" },
+    { tld: ".la", country: "Laos", bounds: [[13.92, 100.09], [22.5, 107.7]], coverage: "full" },
+    { tld: ".my", country: "Malaysia", bounds: [[0.85, 99.64], [7.36, 119.27]], coverage: "full" },
+    { tld: ".pk", country: "Pakistan", bounds: [[23.69, 60.87], [37.1, 77.84]], coverage: "full" },
+    { tld: ".ph", country: "Philippinen", bounds: [[4.61, 116.93], [19.57, 126.6]], coverage: "full" },
+    { tld: ".sg", country: "Singapur", bounds: [[1.26, 103.64], [1.47, 103.84]], coverage: "full" },
+    { tld: ".lk", country: "Sri Lanka", bounds: [[5.92, 79.65], [9.83, 81.88]], coverage: "full" },
+    { tld: ".th", country: "Thailand", bounds: [[5.61, 97.35], [20.46, 105.64]], coverage: "full" },
+    { tld: ".vn", country: "Vietnam", bounds: [[8.56, 102.15], [23.39, 109.46]], coverage: "full" },
+    
+    // Rest of Asia
+    { tld: ".cn", country: "China", bounds: [[18.2, 73.5], [53.56, 134.77]], coverage: "full" },
+    { tld: ".hk", country: "Hong Kong", bounds: [[22.19, 113.84], [22.56, 114.43]], coverage: "full" },
+    { tld: ".jp", country: "Japan", bounds: [[30.4, 129.5], [45.52, 145.82]], coverage: "full" },
+    { tld: ".kg", country: "Kirgisistan", bounds: [[39.18, 69.28], [43.27, 80.28]], coverage: "full" },
+    { tld: ".mn", country: "Mongolei", bounds: [[41.58, 87.75], [52.15, 119.92]], coverage: "full" },
+    { tld: ".kr", country: "Südkorea", bounds: [[33.1, 125.06], [38.61, 129.59]], coverage: "full" },
+    { tld: ".tw", country: "Taiwan", bounds: [[21.9, 119.3], [25.3, 122.0]], coverage: "full" },
+    
+    // Oceania
+    { tld: ".as", country: "Amerikanisch-Samoa", bounds: [[-14.38, -170.85], [-14.13, -169.41]], coverage: "full" },
+    { tld: ".au", country: "Australien", bounds: [[-43.64, 113.15], [-10.58, 153.64]], coverage: "full" },
+    { tld: ".gu", country: "Guam", bounds: [[13.23, 144.62], [13.65, 144.95]], coverage: "full" },
+    { tld: ".nz", country: "Neuseeland", bounds: [[-47.29, 166.71], [-34.39, 178.56]], coverage: "full" },
+    { tld: ".mp", country: "Nördliche Marianen", bounds: [[14.11, 144.89], [20.55, 146.06]], coverage: "full" },
+    { tld: ".um", country: "U.S. Minor Outlying Islands", bounds: [[-0.39, 166.6], [28.22, -177.35]], coverage: "full" },
+    
+    // Africa
+    { tld: ".bw", country: "Botswana", bounds: [[-26.91, 20.0], [-17.78, 29.36]], coverage: "full" },
+    { tld: ".sz", country: "Eswatini", bounds: [[-27.32, 30.79], [-25.72, 32.13]], coverage: "full" },
+    { tld: ".gh", country: "Ghana", bounds: [[4.74, -3.25], [11.17, 1.19]], coverage: "full" },
+    { tld: ".ke", country: "Kenia", bounds: [[-4.67, 33.91], [5.02, 41.91]], coverage: "full" },
+    { tld: ".ls", country: "Lesotho", bounds: [[-30.67, 27.0], [-28.57, 29.46]], coverage: "full" },
+    { tld: ".mg", country: "Madagaskar", bounds: [[-25.6, 43.22], [-11.95, 50.48]], coverage: "full" },
+    { tld: ".ng", country: "Nigeria", bounds: [[4.27, 2.69], [13.89, 14.68]], coverage: "full" },
+    { tld: ".re", country: "Réunion", bounds: [[-21.39, 55.21], [-20.87, 55.84]], coverage: "full" },
+    { tld: ".rw", country: "Ruanda", bounds: [[-2.84, 28.86], [-1.05, 30.9]], coverage: "full" },
+    { tld: ".sn", country: "Senegal", bounds: [[12.31, -17.54], [16.69, -11.34]], coverage: "full" },
+    { tld: ".za", country: "Südafrika", bounds: [[-34.83, 16.45], [-22.13, 32.89]], coverage: "full" },
+    { tld: ".ug", country: "Uganda", bounds: [[-1.48, 29.57], [4.23, 35.03]], coverage: "full" },
+    
+    // Middle East
+    { tld: ".il", country: "Israel", bounds: [[29.49, 34.27], [33.28, 35.9]], coverage: "full" },
+    { tld: ".jo", country: "Jordanien", bounds: [[29.18, 34.96], [33.38, 39.3]], coverage: "full" },
+    { tld: ".ps", country: "Palästina", bounds: [[31.22, 34.21], [32.55, 35.57]], coverage: "full" },
+    { tld: ".qa", country: "Katar", bounds: [[24.47, 50.75], [26.16, 51.61]], coverage: "full" },
+    { tld: ".tn", country: "Tunesien", bounds: [[30.23, 7.52], [37.54, 11.59]], coverage: "full" },
+    { tld: ".tr", country: "Türkei", bounds: [[35.81, 25.66], [42.1, 44.82]], coverage: "full" },
+    { tld: ".ae", country: "Vereinigte Arabische Emirate", bounds: [[22.63, 51.58], [26.08, 56.38]], coverage: "full" }
+];
+
+
+        
+        let map;
+        let currentTLD;
+        let score = 0;
+        let round = 0;
+        let maxRounds = 10;
+        let guessLayer;
+        let hasGuessed = false;
+        let usedTLDs = [];
+        let filteredTLDs = [];
+        
+        // DOM-Elemente
+        const nextRoundBtn = document.getElementById('next-round');
+        const newGameBtn = document.getElementById('new-game');
+        const scoreElement = document.getElementById('score');
+        const roundElement = document.getElementById('round');
+        const tldElement = document.getElementById('current-tld');
+        const statusMessage = document.getElementById('status-message');
+        const includeRareCheckbox = document.getElementById('include-rare');
+        
+        // Initialisiere die Karte
+        function initMap() {
+            map = L.map('map').setView([20, 0], 2);
+            
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            
+            guessLayer = L.layerGroup().addTo(map);
+        }
+        
+        // Filtere TLDs basierend auf Benutzereinstellungen
+        function filterTLDs() {
+            const includeRare = includeRareCheckbox.checked;
+            
+            if (includeRare) {
+                filteredTLDs = [...tldDatabase];
+            } else {
+                filteredTLDs = tldDatabase.filter(item => item.coverage === "full");
+            }
+        }
+        
+        // Wähle eine zufällige, noch nicht verwendete TLD
+        function getRandomTLD() {
+            // Wenn alle TLDs verwendet wurden, setze zurück
+            if (usedTLDs.length >= filteredTLDs.length) {
+                usedTLDs = [];
+            }
+            
+            // Filtere nicht verwendete TLDs
+            const availableTLDs = filteredTLDs.filter(item => !usedTLDs.includes(item.tld));
+            
+            // Wähle zufällige TLD
+            const randomIndex = Math.floor(Math.random() * availableTLDs.length);
+            const selectedTLD = availableTLDs[randomIndex];
+            
+            // Markiere als verwendet
+            usedTLDs.push(selectedTLD.tld);
+            
+            return selectedTLD;
+        }
+        
+        // Starte eine neue Runde
+        function startNewRound() {
+            // Aktualisiere Rundenzähler
+            round++;
+            roundElement.textContent = round;
+            
+            // Entferne vorherige Markierungen
+            guessLayer.clearLayers();
+            
+            // Wähle zufällige TLD
+            currentTLD = getRandomTLD();
+            
+            // Zeige TLD an
+            tldElement.textContent = currentTLD.tld;
+            
+            // Füge Coverage-Indikator hinzu
+            const coverageClass = currentTLD.coverage === "full" ? "full-coverage" : "rare-coverage";
+            const coverageText = currentTLD.coverage === "full" ? "Vollständige Abdeckung" : "Seltene Abdeckung";
+            
+            // Setze Status zurück
+            hasGuessed = false;
+            nextRoundBtn.disabled = true;
+            statusMessage.textContent = "";
+            
+            // Aktiviere Klick-Handler
+            map.on('click', handleMapClick);
+        }
+        
+        // Behandle Klick auf die Karte
+        function handleMapClick(e) {
+            if (hasGuessed) return;
+            
+            const clickedLat = e.latlng.lat;
+            const clickedLng = e.latlng.lng;
+            
+            // Markiere den geklickten Punkt
+            L.marker([clickedLat, clickedLng]).addTo(guessLayer);
+            
+            // Überprüfe, ob der Klick innerhalb der Grenzen des Landes liegt
+            const bounds = L.latLngBounds(currentTLD.bounds);
+            const isCorrect = bounds.contains([clickedLat, clickedLng]);
+            
+            // Zeige das korrekte Land an
+            L.rectangle(bounds, {
+                color: isCorrect ? 'green' : 'red',
+                weight: 2,
+                fillOpacity: 0.2
+            }).addTo(guessLayer);
+            
+            // Zeige Ländername und Coverage-Status an
+            const coverageText = currentTLD.coverage === "full" ? 
+                "<span class='coverage-indicator full-coverage'>Vollständige Abdeckung</span>" : 
+                "<span class='coverage-indicator rare-coverage'>Seltene Abdeckung</span>";
+                
+            L.popup()
+                .setLatLng(bounds.getCenter())
+                .setContent(`<b>${currentTLD.country}</b><br>${currentTLD.tld}<br>${coverageText}`)
+                .openOn(map);
+            
+            // Aktualisiere Punktestand
+            if (isCorrect) {
+                score += 100;
+                scoreElement.textContent = score;
+                statusMessage.textContent = "Richtig! +100 Punkte";
+                statusMessage.style.color = "green";
+            } else {
+                statusMessage.textContent = "Falsch! Das war " + currentTLD.country;
+                statusMessage.style.color = "red";
+            }
+            
+            // Markiere als geraten
+            hasGuessed = true;
+            
+            // Deaktiviere Klicks bis zur nächsten Runde
+            map.off('click', handleMapClick);
+            
+            // Aktiviere Next-Button, wenn Spiel noch nicht beendet
+            if (round < maxRounds) {
+                nextRoundBtn.disabled = false;
+            } else {
+                // Spiel beendet
+                setTimeout(() => {
+                    alert(`Spiel beendet! Dein Punktestand: ${score}`);
+                    statusMessage.textContent = "Spiel beendet!";
+                }, 1000);
+            }
+        }
+        
+        // Starte ein neues Spiel
+        function newGame() {
+            score = 0;
+            round = 0;
+            usedTLDs = [];
+            
+            // Filtere TLDs basierend auf Benutzereinstellungen
+            filterTLDs();
+            
+            scoreElement.textContent = score;
+            roundElement.textContent = round;
+            guessLayer.clearLayers();
+            statusMessage.textContent = "";
+            
+            // Deaktiviere Next-Button
+            nextRoundBtn.disabled = true;
+            
+            // Entferne alle Event-Listener und füge sie neu hinzu
+            map.off('click', handleMapClick);
+            
+            startNewRound();
+        }
+        
+        // Event-Listener für Buttons
+        nextRoundBtn.addEventListener('click', () => {
+            if (round < maxRounds && hasGuessed) {
+                startNewRound();
+            }
+        });
+        
+        newGameBtn.addEventListener('click', newGame);
+        
+        // Event-Listener für Checkbox
+        includeRareCheckbox.addEventListener('change', () => {
+            // Starte ein neues Spiel, wenn die Einstellungen geändert werden
+            newGame();
+        });
+        
+        // Initialisiere die Karte beim Laden der Seite
+        window.onload = () => {
+            initMap();
+            newGame();
+        };
+    </script>
+</body>
+</html>
